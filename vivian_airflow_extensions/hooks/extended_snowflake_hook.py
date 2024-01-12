@@ -20,7 +20,7 @@ class ExtendedSnowflakeHook(SnowflakeHook):
 
         self.snowflake_conn_id = snowflake_conn_id
     
-    def generate_rows_from_table(self, query, chunk_size=100):
+    def generate_rows_from_table(self, query, chunk_size=1000):
         """
         Generate rows from a table in chunks.
 
