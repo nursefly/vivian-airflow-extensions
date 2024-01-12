@@ -83,6 +83,10 @@ class SnowflakeToDynamoOperator(BaseOperator):
         self.update_existing = update_existing
         self.json_fields = json_fields
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=snowflake_conn_id)
+        if self.column_format == 'camel':
+            self.json_fields = [self._camel_case(field) for field in self.json_fields]
+        else:
+            self.json_fields = [field.lower() for field in self.json_fields]
         
     def _convert_nan(self, item):
         """
@@ -107,12 +111,37 @@ class SnowflakeToDynamoOperator(BaseOperator):
         """
         output = ''.join(x for x in string.title() if x.isalnum())
         return output[0].lower() + output[1:]
+    
+    def _format_for_dynamo(self, row_dict, updated_at):
+        if self.column_format == 'camel':
+            row_dict = {self._camel_case(key): value for key, value in row_dict.items()}
+        elif self.column_format == 'lower':
+            row_dict = {key.lower(): value for key, value in row_dict.items()}
 
-    def _update(self, rows_iter):
+        row_dict = {key: float(value) if isinstance(value, Decimal) else value for key, value in row_dict.items()}
+
+        if self.add_updated_at:
+            if self.column_format == 'camel':
+                row_dict['updatedAt'] = updated_at
+            else:
+                row_dict['updated_at'] = updated_at
+
+        if self.ttl_timestamp is not None:
+            row_dict['_airflow_ttl'] = float(self.ttl_timestamp)
+
+        for field in self.json_fields:
+            if pd.isna(row_dict[field]):
+                row_dict[field] = None
+            else:
+                row_dict[field] = json.loads(row_dict[field])
+
+        return row_dict
+
+    def _update(self, rows_generator):
         """
         Update the DynamoDB table with the given rows.
 
-        :param rows_iter: An iterator that yields the rows to update.
+        :param rows_generator: An generator that yields the rows to update.
         """
         model_columns = self.dynamo_model._attributes.keys()
         model_keys = [self.dynamo_model._hash_keyname]
@@ -122,7 +151,11 @@ class SnowflakeToDynamoOperator(BaseOperator):
 
         n = 0
         self.log.info(f'Starting UPDATE load to {self.dynamo_model}')
-        for row_dict in rows_iter:
+        updated_at = datetime.now()
+        for row_dict, _ in rows_generator:
+            # run the default reformatting for dynamo uploads
+            row_dict = self._format_for_dynamo(row_dict, updated_at)
+
             # run the user-supplied cleaning function
             if self.cleaning_function is not None:
                 row_dict = self.cleaning_function(row_dict, model_columns)
@@ -153,17 +186,20 @@ class SnowflakeToDynamoOperator(BaseOperator):
 
         self.log.info(f'Loaded {n} rows total')
 
-    def _insert(self, rows_iter):
+    def _insert(self, rows_generator):
         """
         Insert the given rows into the DynamoDB table.
 
-        :param rows_iter: An iterator that yields the rows to insert.
+        :param rows_generator: An generator that yields the rows to insert.
         """
         model_columns = self.dynamo_model._attributes.keys()
         n = 0
         with self.dynamo_model.batch_write() as batch_writer:
-            self.log.info(f'Starting INSERT load to {self.dynamo_model}')
-            for row_dict in rows_iter:
+            updated_at = datetime.now()
+            for row_dict, _ in rows_generator:
+                # run the default reformatting for dynamo uploads
+                row_dict = self._format_for_dynamo(row_dict, updated_at)
+
                 # run the user-supplied cleaning function
                 if self.cleaning_function is not None:
                     row_dict = self.cleaning_function(row_dict, model_columns)
@@ -189,44 +225,12 @@ class SnowflakeToDynamoOperator(BaseOperator):
         self.log.info(f'Loaded {n} rows')
 
     def execute(self, context):
-        if self.column_format == 'camel':
-            self.json_fields = [self._camel_case(field) for field in self.json_fields]
-        else:
-            self.json_fields = [field.lower() for field in self.json_fields]
-
-        rows_generator = self.snowflake_hook.generate_rows_from_table(self.snowflake_query, self.chunksize)
-        updated_at = datetime.now()
-
-        rows = []
-        for row, headers in rows_generator:
-            if self.column_format == 'camel':
-                row = {self._camel_case(key): value for key, value in row.items()}
-            elif self.column_format == 'lower':
-                row = {key.lower(): value for key, value in row.items()}
-
-            row = {key: float(value) if isinstance(value, Decimal) else value for key, value in row.items()}
-
-            if self.add_updated_at:
-                if self.column_format == 'camel':
-                    row['updatedAt'] = updated_at
-                else:
-                    row['updated_at'] = updated_at
-
-            if self.ttl_timestamp is not None:
-                row['_airflow_ttl'] = float(self.ttl_timestamp)
-
-            for field in self.json_fields:
-                if pd.isna(row[field]):
-                    row[field] = None
-                else:
-                    row[field] = json.loads(row[field])
-
-            rows.append(row)
+        rows_generator = self.snowflake_hook.generate_rows_from_table(self.snowflake_query)
 
         if not self.update_existing:
-            self._insert(rows)
+            self._insert(rows_generator)
         else:
-            self._update(rows)
+            self._update(rows_generator)
 
 class SnowflakeToDynamoBookmarkOperator(SnowflakeToDynamoOperator):
     template_fields = ['snowflake_query', 'ttl_timestamp', 'bookmark_s3_key']
