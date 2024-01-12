@@ -20,7 +20,7 @@ class ExtendedSnowflakeHook(SnowflakeHook):
 
         self.snowflake_conn_id = snowflake_conn_id
     
-    def generate_rows_from_table(self, query, chunk_size=1000):
+    def generate_rows_from_table(self, query, chunk_size=100):
         """
         Generate rows from a table in chunks.
 
@@ -32,14 +32,20 @@ class ExtendedSnowflakeHook(SnowflakeHook):
 
         cursor.execute(query)
 
+        # Get column names once
+        column_names = [desc[0] for desc in cursor.description]
+        # Create a dictionary with column names as keys and None as values
+        row_dict = dict.fromkeys(column_names)
+
         while True:
             rows = cursor.fetchmany(chunk_size)
             if not rows:
                 break
 
             for row in rows:
-                row_dict = dict(zip([desc[0] for desc in cursor.description], row))
-                yield row_dict, [desc[0] for desc in cursor.description]
+                # Update values of row_dict for each row
+                row_dict.update(zip(column_names, row))
+                yield row_dict, column_names
     
     def save_snowflake_results_to_tmp_file(self, query, array_fields, file, destination_type='snowflake'):
         """
