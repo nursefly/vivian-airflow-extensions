@@ -82,6 +82,7 @@ class SnowflakeToDynamoOperator(BaseOperator):
         self.ttl_timestamp = ttl_timestamp
         self.update_existing = update_existing
         self.json_fields = json_fields
+        self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=snowflake_conn_id)
         if self.column_format == 'camel':
             self.json_fields = [self._camel_case(field) for field in self.json_fields]
         else:
@@ -224,7 +225,6 @@ class SnowflakeToDynamoOperator(BaseOperator):
         self.log.info(f'Loaded {n} rows')
 
     def execute(self, context):
-        self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id)
         rows_generator = self.snowflake_hook.generate_rows_from_table(self.snowflake_query)
 
         if not self.update_existing:
@@ -262,7 +262,6 @@ class SnowflakeToDynamoBookmarkOperator(SnowflakeToDynamoOperator):
         self.bookmark_s3_key = bookmark_s3_key
 
     def execute(self, context):
-        self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id)
         s3_bookmark_hook = S3BookmarkHook(bookmark_s3_key=self.bookmark_s3_key, incremental_key_type=self.incremental_key_type)
         latest_bookmark = s3_bookmark_hook._get_latest_bookmark()
         self.snowflake_query = f'with inner_cte as ({self.snowflake_query}) select * from inner_cte where {self.incremental_key} > {latest_bookmark}'

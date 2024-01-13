@@ -41,11 +41,10 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.prep_commands = None
         self.snowflake_conn_id = snowflake_conn_id
         self.postgres_conn_id = postgres_conn_id
-
-    def execute(self, context):
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
         self.postgres_hook = ExtendedPostgresHook(postgres_conn_id=self.postgres_conn_id, pool_pre_ping=True)
 
+    def execute(self, context):
         with NamedTemporaryFile('w+') as file:
             self.log.info('START get snowflake data')
             new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(self.snowflake_query, self.array_fields, file, 'postgres')
@@ -87,9 +86,6 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         self.columns_to_update = columns_to_update
     
     def execute(self, context):
-        self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
-        self.postgres_hook = ExtendedPostgresHook(postgres_conn_id=self.postgres_conn_id, pool_pre_ping=True)
-
         # this if/else statement assigns the on conflict clause, if any
         if self.primary_key_columns is None:
             on_conflict_clause = ''
@@ -140,7 +136,6 @@ class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOpe
         self.bookmark_s3_key = bookmark_s3_key
 
     def execute(self, context):
-        self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
         self.s3_bookmark_hook = S3BookmarkHook(bookmark_s3_key=self.bookmark_s3_key, incremental_key_type=self.incremental_key_type)
 
         latest_bookmark = self.s3_bookmark_hook._get_latest_bookmark()
