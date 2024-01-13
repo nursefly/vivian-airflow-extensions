@@ -1,4 +1,4 @@
-# Open-sourced Airflow Addons by Vivian Health 
+# Open Source Airflow Addons by Vivian Health 
 This repository contains custom operators and sensors for Apache Airflow. These operators and sensors are designed to facilitate data transfer between different systems such as Snowflake, DynamoDB, PostgreSQL, and Stitch.
 
 ## Setup
