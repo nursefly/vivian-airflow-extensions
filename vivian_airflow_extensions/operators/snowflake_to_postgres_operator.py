@@ -91,9 +91,10 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = ''
         else:
             if self.columns_to_update is None:
-                self.columns_to_update = self.postgres_hook._get_column_metadata(self.postgres_table)
+                raw_column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+                self.columns_to_update = [col for col in raw_column_list if col not in self.primary_key_columns]
                 
-            columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update if col not in self.primary_key_columns])
+            columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update])
             primary_key_columns_string = ", ".join(['"' + col + '"' for col in self.primary_key_columns])
             on_conflict_clause = f'on conflict({primary_key_columns_string}) do update set {columns_to_update_string}'
 
