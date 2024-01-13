@@ -34,7 +34,6 @@ class StitchMonitorSourceSensor(BaseSensorOperator):
         self.sleep_time = sleep_time
         self.timeout = timeout
         self.start_time = start_time
-        self.stitch_hook = StitchHook(conn_id=self.conn_id)
 
     def poke(self, context):
         """
@@ -43,6 +42,8 @@ class StitchMonitorSourceSensor(BaseSensorOperator):
         :param context: The execution context.
         :return: Whether the condition is satisfied.
         """
+        self.stitch_hook = StitchHook(conn_id=self.conn_id)
+
         tic = datetime.now()
 
         self.stitch_hook._get_credentials()

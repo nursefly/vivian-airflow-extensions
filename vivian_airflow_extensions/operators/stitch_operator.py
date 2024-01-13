@@ -34,9 +34,9 @@ class StitchRunSourceOperator(BaseOperator):
         self.source_id = source_id
         self.client_id = client_id
         self.conn_id = conn_id
-        self.stitch_hook = StitchHook(conn_id=self.conn_id)
 
     def execute(self, context):
+        self.stitch_hook = StitchHook(conn_id=self.conn_id)
         self.stitch_hook._get_credentials()
         self.log.info(f'Starting extraction: source_id = {self.source_id}')
         self.stitch_hook._trigger_extraction(source_id=self.source_id, client_id=self.client_id)
