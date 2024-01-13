@@ -38,7 +38,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.postgres_table = postgres_table
         self.array_fields = array_fields
         self.snowflake_query = snowflake_query
-        self.prep_commands = None
+        self.insert_commands = None
         self.snowflake_conn_id = snowflake_conn_id
         self.postgres_conn_id = postgres_conn_id
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
@@ -64,7 +64,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
             self.postgres_hook._write_to_db(file, columns_string, tmp_table)
 
         self.log.info('START swap db tables')
-        self.postgres_hook._swap_db_tables(self.postgres_table)
+        self.postgres_hook._swap_db_tables(self.postgres_table, self.insert_commands)
 
 class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
     """
@@ -100,10 +100,10 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         tmp_table = f'Tmp{self.postgres_table}'
 
         if self.columns_to_update is None:
-            self.prep_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
+            self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
             column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
-            self.prep_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause};']
+            self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause};']
 
         super().execute(context)
 

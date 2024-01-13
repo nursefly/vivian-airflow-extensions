@@ -16,7 +16,6 @@ class ExtendedPostgresHook(PostgresHook):
         super().__init__(*args, **kwargs)
 
         self.postgres_conn_id = postgres_conn_id
-        self.prep_commands = None
          
     def _run_psql_commands_in_transaction(self, commands):
         """
@@ -108,18 +107,14 @@ class ExtendedPostgresHook(PostgresHook):
         tmp_table = f'Tmp{table}'
         swap_table = f'Swap{table}'
 
-        for col in self.serial_columns:
-            prep_commands.extend([
-                f'alter table if exists "{tmp_table}" alter column "{col}" drop default;',
-                f'alter table if exists "{swap_table}" alter column "{col}" drop default;',
-                f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";'
-            ])
-
         prep_commands.extend([
             f'drop table if exists "{tmp_table}";',
             f'drop table if exists "{swap_table}";',
             f'create table "{tmp_table}" (like "{table}" including all);',
         ])
+
+        for col in self.serial_columns:
+            prep_commands.append(f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";')
 
         # have to add the foreign keys to the new table
         for key in self.constraints:
@@ -146,7 +141,7 @@ class ExtendedPostgresHook(PostgresHook):
         conn.commit()
         conn.close()
     
-    def _swap_db_tables(self, table):
+    def _swap_db_tables(self, table, prep_commands=None):
         """
         Swap the names of the given table and a temporary table.
 
@@ -155,27 +150,27 @@ class ExtendedPostgresHook(PostgresHook):
         tmp_table = f'Tmp{table}'
         swap_table = f'Swap{table}'
 
-        if self.prep_commands is None:
-            self.prep_commands = [
+        if prep_commands is None:
+            prep_commands = [
                 f'alter table if exists "{table}" rename to "{swap_table}";',
                 f'alter table if exists "{tmp_table}" rename to "{table}";',
             ]      
 
             for col in self.serial_columns:
-                self.prep_commands.extend([
+                prep_commands.extend([
                     f'alter table if exists "{swap_table}" alter column "{col}" drop default;',
                     f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";'
                 ])
             
-            self.prep_commands.append(f'drop table if exists "{swap_table}";')
+            prep_commands.append(f'drop table if exists "{swap_table}";')
 
             # have to rename the constraints to match the old table
             for key in self.constraints:
-                self.prep_commands.append(f'alter table if exists "{table}" rename constraint "Tmp{key[0]}" to "{key[0]}";')  
+                prep_commands.append(f'alter table if exists "{table}" rename constraint "Tmp{key[0]}" to "{key[0]}";')  
             
             # have to rename the indexes to match the old table
             for index in self.indexes:
-                self.prep_commands.append(f'alter index if exists "Tmp{index}" rename to "{index}";')
+                prep_commands.append(f'alter index if exists "Tmp{index}" rename to "{index}";')
 
-        self.log.info(self.prep_commands)
-        self._run_psql_commands_in_transaction(self.prep_commands)
+        self.log.info(prep_commands)
+        self._run_psql_commands_in_transaction(prep_commands)
