@@ -109,8 +109,8 @@ class ExtendedPostgresHook(PostgresHook):
         swap_table = f'Swap{table}'
 
         prep_commands.extend([
-            f'drop table if exists "{tmp_table}";',
-            f'drop table if exists "{swap_table}";',
+            f'drop table if exists "{tmp_table}" cascade;',
+            f'drop table if exists "{swap_table}" cascade;',
             f'create table "{tmp_table}" (like "{table}" including all);',
         ])
 
@@ -163,7 +163,7 @@ class ExtendedPostgresHook(PostgresHook):
                     f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";'
                 ])
             
-            prep_commands.append(f'drop table if exists "{swap_table}";')
+            prep_commands.append(f'drop table if exists "{swap_table}" cascade;')
 
             # have to rename the constraints to match the old table
             for key in self.constraints:
@@ -174,7 +174,7 @@ class ExtendedPostgresHook(PostgresHook):
                 prep_commands.append(f'alter index if exists "Tmp{index}" rename to "{index}";')
         
         else:
-            prep_commands.append(f'drop table if exists "{tmp_table}";')
+            prep_commands.append(f'drop table if exists "{tmp_table}" cascade;')
 
         self.log.info(prep_commands)
         self._run_psql_commands_in_transaction(prep_commands)
