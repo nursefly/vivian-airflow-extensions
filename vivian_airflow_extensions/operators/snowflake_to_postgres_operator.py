@@ -18,7 +18,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
     template_fields = ['snowflake_query']
 
     @apply_defaults
-    def __init__(self, postgres_table: str=None, snowflake_query: str=None, array_fields: list=[], snowflake_conn_id='snowflake_default', postgres_conn_id='postgres_default', *args, **kwargs) -> None:
+    def __init__(self, postgres_table: str=None, snowflake_query: str=None, array_fields: list=[], snowflake_conn_id='snowflake_default', postgres_conn_id='postgres_default', include_autoincrement_keys=False, *args, **kwargs) -> None:
         """
         Initialize a new instance of SnowflakeToPostgresOperator.
 
@@ -27,6 +27,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
         :param array_fields: The fields to treat as arrays.
         :param snowflake_conn_id: The ID of the Snowflake connection to use.
         :param postgres_conn_id: The ID of the Postgres connection to use.
+        :param include_autoincrement_keys: Also load any autoincrementing key fields.
         """
         super().__init__(*args, **kwargs)
 
@@ -41,6 +42,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.insert_commands = None
         self.snowflake_conn_id = snowflake_conn_id
         self.postgres_conn_id = postgres_conn_id
+        self.include_autoincrement_keys = include_autoincrement_keys
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
         self.postgres_hook = ExtendedPostgresHook(postgres_conn_id=self.postgres_conn_id, pool_pre_ping=True)
 
@@ -53,7 +55,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
                 return
 
             self.log.info('START get column list')
-            columns_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+            columns_list = self.postgres_hook._get_column_metadata(self.postgres_table, self.include_autoincrement_keys)
             columns_string = ", ".join([f'"{col}"' for col in columns_list])
 
             self.log.info('START create tmp table')
@@ -91,7 +93,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = ''
         else:
             if self.columns_to_update is None:
-                raw_column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+                raw_column_list = self.postgres_hook._get_column_metadata(self.postgres_table, self.include_autoincrement_keys)
                 self.columns_to_update = [col for col in raw_column_list if col not in self.primary_key_columns]
                 
             columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update])

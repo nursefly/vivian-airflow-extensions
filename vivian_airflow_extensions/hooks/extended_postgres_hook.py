@@ -41,7 +41,7 @@ class ExtendedPostgresHook(PostgresHook):
             self.log.debug('[_run_psql_commands_in_transaction] -  closing conn')
             conn.close()
     
-    def _get_column_metadata(self, table):
+    def _get_column_metadata(self, table, include_autoincrement_keys=False):
         """
         Get metadata about the columns of a table.
 
@@ -86,9 +86,10 @@ class ExtendedPostgresHook(PostgresHook):
             conn.close()
 
         self.serial_columns = []
-        for column in column_names_results:
-            if column[1] == 'integer' and column[2] is not None and 'nextval' in column[2]:
-                self.serial_columns.append(column[0])
+        if not include_autoincrement_keys:
+            for column in column_names_results:
+                if column[1] == 'integer' and column[2] is not None and 'nextval' in column[2]:
+                    self.serial_columns.append(column[0])
         
         self.columns_list = [column[0] for column in column_names_results if column[0] not in self.serial_columns]
         self.constraints = constraints_results
