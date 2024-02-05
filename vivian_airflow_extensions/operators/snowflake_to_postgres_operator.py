@@ -53,8 +53,10 @@ class SnowflakeToPostgresOperator(BaseOperator):
                 return
 
             self.log.info('START get column list')
-            columns_list = self.postgres_hook._get_column_metadata(self.postgres_table)
-            columns_string = ", ".join([f'"{col}"' for col in columns_list])
+            self.column_list = getattr(self, 'column_list', None)
+            if self.column_list is None:
+                self.column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+            columns_string = ", ".join([f'"{col}"' for col in self.column_list])
 
             self.log.info('START create tmp table')
             self.postgres_hook._create_tmp_table(self.postgres_table)        
@@ -103,8 +105,8 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         if self.columns_to_update is None:
             self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
-            column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
-            self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause};']
+            self.column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
+            self.insert_commands = [f'insert into "{self.postgres_table}" ({self.column_list}) select {self.column_list} from "{tmp_table}" {on_conflict_clause};']
 
         super().execute(context)
 
