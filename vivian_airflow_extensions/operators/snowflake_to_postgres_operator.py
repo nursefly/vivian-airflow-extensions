@@ -54,8 +54,11 @@ class SnowflakeToPostgresOperator(BaseOperator):
 
             self.log.info('START get column list')
             self.column_list = getattr(self, 'column_list', None)
+            # this if/else statement exists to avoid trying to update columns that are meant to be excluded from some instantiations of child classes
             if self.column_list is None:
                 self.column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+            else:
+                self.postgres_hook._get_column_metadata(self.postgres_table)
             columns_string = ", ".join([f'"{col}"' for col in self.column_list])
 
             self.log.info('START create tmp table')
