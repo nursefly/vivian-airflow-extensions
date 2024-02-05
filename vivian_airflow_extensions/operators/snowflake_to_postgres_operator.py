@@ -53,20 +53,18 @@ class SnowflakeToPostgresOperator(BaseOperator):
                 return
 
             self.log.info('START get column list')
-            self.column_list = getattr(self, 'column_list', None)
-            # this if/else statement exists to avoid trying to update columns that are meant to be excluded from some instantiations of child classes
-            if self.column_list is None:
-                self.column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
-            else:
-                self.postgres_hook._get_column_metadata(self.postgres_table)
-            columns_string = ", ".join([f'"{col}"' for col in self.column_list])
+            self.column_string = getattr(self, 'column_string', None)
+            column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
+            # this if statement exists to avoid trying to update columns that are meant to be excluded from some instantiations of child classes
+            if self.column_string is None:             
+                self.column_string = ", ".join([f'"{col}"' for col in column_list])
 
             self.log.info('START create tmp table')
             self.postgres_hook._create_tmp_table(self.postgres_table)        
 
             self.log.info('START write to DB')
             tmp_table = f'Tmp{self.postgres_table}'
-            self.postgres_hook._write_to_db(file, columns_string, tmp_table)
+            self.postgres_hook._write_to_db(file, self.column_string, tmp_table)
 
         self.log.info('START swap db tables')
         self.postgres_hook._swap_db_tables(self.postgres_table, self.insert_commands)
@@ -108,8 +106,8 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         if self.columns_to_update is None:
             self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
-            self.column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
-            self.insert_commands = [f'insert into "{self.postgres_table}" ({self.column_list}) select {self.column_list} from "{tmp_table}" {on_conflict_clause};']
+            self.column_string = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
+            self.insert_commands = [f'insert into "{self.postgres_table}" ({self.column_string}) select {self.column_string} from "{tmp_table}" {on_conflict_clause};']
 
         super().execute(context)
 
