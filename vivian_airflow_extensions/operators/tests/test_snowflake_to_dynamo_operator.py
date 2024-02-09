@@ -127,23 +127,23 @@ class TestSnowflakeToDynamoBookmarkOperator(unittest.TestCase):
 
     @patch('your_module.S3BookmarkHook')  # replace with the actual module
     def test_execute(self, mock_s3_bookmark_hook):
-        mock_s3_bookmark_hook.return_value._get_latest_bookmark.return_value = 1
-        mock_s3_bookmark_hook.return_value._save_next_bookmark.return_value = None
+        mock_s3_bookmark_hook.return_value.get_latest_bookmark.return_value = 1
+        mock_s3_bookmark_hook.return_value.save_next_bookmark.return_value = None
         self.operator.snowflake_hook = MagicMock()
         self.operator.snowflake_hook.run.return_value = [{'bookmark': 2}]
         self.operator.execute(None)
         self.assertIn('where test_key > 1', self.operator.snowflake_query)
-        mock_s3_bookmark_hook.return_value._save_next_bookmark.assert_called_once_with(2)
+        mock_s3_bookmark_hook.return_value.save_next_bookmark.assert_called_once_with(2)
 
     @patch('your_module.S3BookmarkHook')  # replace with the actual module
     def test_execute_no_bookmark(self, mock_s3_bookmark_hook):
-        mock_s3_bookmark_hook.return_value._get_latest_bookmark.return_value = None
-        mock_s3_bookmark_hook.return_value._save_next_bookmark.return_value = None
+        mock_s3_bookmark_hook.return_value.get_latest_bookmark.return_value = None
+        mock_s3_bookmark_hook.return_value.save_next_bookmark.return_value = None
         self.operator.snowflake_hook = MagicMock()
         self.operator.snowflake_hook.run.return_value = [{'bookmark': 2}]
         self.operator.execute(None)
         self.assertIn('where test_key > ', self.operator.snowflake_query)  # Check that the query uses the default value
-        mock_s3_bookmark_hook.return_value._save_next_bookmark.assert_called_once_with(2)
+        mock_s3_bookmark_hook.return_value.save_next_bookmark.assert_called_once_with(2)
 
     def test_init_invalid_incremental_key_type(self):
         with self.assertRaises(AirflowException):

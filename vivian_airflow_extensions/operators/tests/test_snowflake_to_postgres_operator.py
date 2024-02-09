@@ -66,7 +66,7 @@ class TestSnowflakeToPostgresBookmarkOperator(unittest.TestCase):
         ])
 
         # Mock the S3BookmarkHook
-        self.mock_s3_bookmark_hook.return_value._get_latest_bookmark.return_value = '2021-01-11 12:00:00.000'
+        self.mock_s3_bookmark_hook.return_value.get_latest_bookmark.return_value = '2021-01-11 12:00:00.000'
 
         # Execute the operator
         self.operator.execute({})

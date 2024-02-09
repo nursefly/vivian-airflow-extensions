@@ -25,7 +25,7 @@ class TestS3BookmarkHook(unittest.TestCase):
         mock_s3fs().open.return_value.__enter__.return_value = mock_file
 
         hook = S3BookmarkHook(bookmark_s3_key='test_key', incremental_key_type='int')
-        bookmark = hook._get_latest_bookmark()
+        bookmark = hook.get_latest_bookmark()
 
         self.assertEqual(bookmark, '123')
 
@@ -34,7 +34,7 @@ class TestS3BookmarkHook(unittest.TestCase):
         mock_s3fs().open.side_effect = FileNotFoundError
 
         hook = S3BookmarkHook(bookmark_s3_key='test_key', incremental_key_type='int')
-        bookmark = hook._get_latest_bookmark()
+        bookmark = hook.get_latest_bookmark()
 
         self.assertEqual(bookmark, 0)
 
@@ -44,7 +44,7 @@ class TestS3BookmarkHook(unittest.TestCase):
         mock_s3fs().open.return_value.__enter__.return_value = mock_file
 
         hook = S3BookmarkHook(bookmark_s3_key='test_key', incremental_key_type='int')
-        hook._save_next_bookmark(datetime(2022, 1, 1))
+        hook.save_next_bookmark(datetime(2022, 1, 1))
 
         mock_file.write.assert_called_once_with('2022-01-01 00:00:00')
 
@@ -54,7 +54,7 @@ class TestS3BookmarkHook(unittest.TestCase):
         mock_s3fs().open.return_value.__enter__.return_value = mock_file
 
         hook = S3BookmarkHook(bookmark_s3_key='test_key', incremental_key_type='int')
-        hook._save_next_bookmark(None)
+        hook.save_next_bookmark(None)
 
         mock_file.write.assert_not_called()
 

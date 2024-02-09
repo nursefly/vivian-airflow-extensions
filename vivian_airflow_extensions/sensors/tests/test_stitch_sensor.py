@@ -19,8 +19,8 @@ class TestStitchMonitorSourceSensor(unittest.TestCase):
             )
 
     def test_poke(self):
-        self.mock_stitch_hook.return_value._monitor_extraction.return_value = True
-        self.mock_stitch_hook.return_value._get_credentials.return_value = True
+        self.mock_stitch_hook.return_value.monitor_extraction.return_value = True
+        self.mock_stitch_hook.return_value.get_credentials.return_value = True
 
         # Execute the operator
         self.task.poke({})
