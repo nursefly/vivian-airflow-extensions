@@ -18,7 +18,8 @@ class SnowflakeToPostgresOperator(BaseOperator):
     template_fields = ['snowflake_query']
 
     @apply_defaults
-    def __init__(self, postgres_table: str=None, snowflake_query: str=None, array_fields: list=[], snowflake_conn_id='snowflake_default', postgres_conn_id='postgres_default', *args, **kwargs) -> None:
+    def __init__(self, postgres_table: str=None, snowflake_query: str=None, array_fields: list=[], snowflake_conn_id='snowflake_default', 
+                 postgres_conn_id='postgres_default', schema: str='public', *args, **kwargs) -> None:
         """
         Initialize a new instance of SnowflakeToPostgresOperator.
 
@@ -41,8 +42,10 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.insert_commands = None
         self.snowflake_conn_id = snowflake_conn_id
         self.postgres_conn_id = postgres_conn_id
+        self.schema = schema
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
         self.postgres_hook = ExtendedPostgresHook(postgres_conn_id=self.postgres_conn_id, pool_pre_ping=True)
+        self.metadata_retrieved = False
 
     def execute(self, context):
         with NamedTemporaryFile('w+') as file:
@@ -53,18 +56,20 @@ class SnowflakeToPostgresOperator(BaseOperator):
                 return
 
             self.log.info('START get column list')
-            columns_list = self.postgres_hook._get_column_metadata(self.postgres_table)
-            columns_string = ", ".join([f'"{col}"' for col in columns_list])
+            if not self.metadata_retrieved:
+                self.non_sequential_columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema)
+                self.metadata_retrieved = True
+            columns_string = ", ".join([f'"{col}"' for col in self.non_sequential_columns_list])
 
             self.log.info('START create tmp table')
-            self.postgres_hook._create_tmp_table(self.postgres_table)        
+            self.postgres_hook.create_tmp_table(self.postgres_table)        
 
             self.log.info('START write to DB')
             tmp_table = f'Tmp{self.postgres_table}'
-            self.postgres_hook._write_to_db(file, columns_string, tmp_table)
+            self.postgres_hook.write_to_db(file, columns_string, tmp_table)
 
         self.log.info('START swap db tables')
-        self.postgres_hook._swap_db_tables(self.postgres_table, self.insert_commands)
+        self.postgres_hook.swap_db_tables(self.postgres_table, self.insert_commands)
 
 class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
     """
@@ -91,8 +96,9 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = ''
         else:
             if self.columns_to_update is None:
-                raw_column_list = self.postgres_hook._get_column_metadata(self.postgres_table)
-                self.columns_to_update = [col for col in raw_column_list if col not in self.primary_key_columns]
+                self.non_sequential_columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema)
+                self.metadata_retrieved = True
+                self.columns_to_update = [col for col in self.non_sequential_columns_list if col not in self.primary_key_columns]
                 
             columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update])
             primary_key_columns_string = ", ".join(['"' + col + '"' for col in self.primary_key_columns])
@@ -139,11 +145,11 @@ class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOpe
     def execute(self, context):
         self.s3_bookmark_hook = S3BookmarkHook(bookmark_s3_key=self.bookmark_s3_key, incremental_key_type=self.incremental_key_type)
 
-        latest_bookmark = self.s3_bookmark_hook._get_latest_bookmark()
+        latest_bookmark = self.s3_bookmark_hook.get_latest_bookmark()
         self.snowflake_query = f'with inner_cte as ({self.snowflake_query}) select * from inner_cte where {self.incremental_key} > {latest_bookmark}'
         self.bookmark_query = f'with outer_cte as ({self.snowflake_query}) select max({self.incremental_key}) as "bookmark" from outer_cte'
         next_bookmark = self.snowflake_hook.run(sql=self.bookmark_query, handler=lambda cursor: cursor.fetchall())[0]['bookmark']
 
         super().execute(context)
 
-        self.s3_bookmark_hook._save_next_bookmark(next_bookmark)
+        self.s3_bookmark_hook.save_next_bookmark(next_bookmark)

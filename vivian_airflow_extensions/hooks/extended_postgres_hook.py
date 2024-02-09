@@ -26,6 +26,7 @@ class ExtendedPostgresHook(PostgresHook):
         conn = self.get_conn()
         cursor = conn.cursor()
         self.log.debug('[_run_psql_commands_in_transaction] -  running commands')
+        self.log.info('\n' + '\n'.join(f"    {command}" for command in commands))
 
         try:
             for cmd in commands:
@@ -41,19 +42,57 @@ class ExtendedPostgresHook(PostgresHook):
             self.log.debug('[_run_psql_commands_in_transaction] -  closing conn')
             conn.close()
     
-    def _get_column_metadata(self, table):
+    def _generate_drop_table_attributes_commands(self, table):
         """
-        Get metadata about the columns of a table.
+        Generates SQL commands to drop attributes of a table.
 
-        :param table: The name of the table to get metadata for.
+        This function generates SQL commands to drop the constraints, indexes, 
+        and sequences associated with a given table. It is intended to be used 
+        when you want to recreate a table with different attributes.
+
+        :param table: The name of the table for which to generate the drop commands.
+        :type table: str
+
+        :return: A list of SQL commands to drop the table's constraints, indexes, and sequences.
+        :rtype: list of str
         """
         conn = self.get_conn()
         cursor = conn.cursor()
 
-        # get the column names from the postgres table, excluding serial columns
-        column_names_sql_query = f'select column_name, data_type, column_default from information_schema.columns where table_name = \'{table}\' order by ordinal_position;'
+        # Generate commands to drop all constraints from the table
+        cursor.execute(f"""
+            select 'alter table "{table}" drop constraint if exists "' || conname || '";'
+            from pg_constraint 
+            inner join pg_class on conrelid=pg_class.oid 
+            where relname='{table}';
+        """)
 
-        # get the constraints from the postgres table
+        self.drop_constraint_commands = [row[0] for row in cursor.fetchall()]
+
+        # Generate commands to drop all indexes from the table
+        cursor.execute(f"""
+            select 'drop index if exists "' || indexname || '";'
+            from pg_indexes 
+            where tablename='{table}';
+        """)
+
+        self.drop_index_commands = [row[0] for row in cursor.fetchall() if row[0]]
+    
+    def _get_table_columns(self, table, cursor):
+        columns_sql_query = f"""
+            select 
+                column_name, 
+                data_type, 
+                column_default 
+            from information_schema.columns 
+            where table_name = '{table}';
+        """
+
+        cursor.execute(columns_sql_query)
+        columns_results = cursor.fetchall()
+        return columns_results
+
+    def _get_table_constraints(self, table, cursor):
         constraints_sql_query = f"""
             select
                 conname, 
@@ -63,68 +102,140 @@ class ExtendedPostgresHook(PostgresHook):
             where replace(conrelid::regclass::text, '"', '') = '{table}';
         """
 
-        # get the indexes from the postgres table
+        cursor.execute(constraints_sql_query)
+        constraints_results = cursor.fetchall()
+        return constraints_results
+
+    def _get_table_indexes(self, table, cursor):
         indexes_sql_query = f"""
-            select indexname
+            select indexname, indexdef
             from pg_indexes
             where tablename = '{table}';
         """
 
+        cursor.execute(indexes_sql_query)
+        indexes_results = cursor.fetchall()
+        return indexes_results
+
+    def _get_table_sequences(self, cursor, schema, columns_results):
+        """
+        Retrieves the sequences associated with a given table.
+
+        This function queries the PostgreSQL system catalogs to find sequences 
+        that are associated with the specified table. Sequences are database objects 
+        that are often used to create unique identifiers for rows in a table.
+
+        :param table: The name of the table for which to retrieve the sequences.
+        :type table: str
+
+        :return: A list of sequences associated with the table.
+        :rtype: list of str
+        """
+        self.sequences = []
+        for column in columns_results:
+            # Checks if the column is a sequence
+            if column[1] == 'integer' and column[2] is not None and 'nextval' in column[2]:
+                seq_results = column[2].split("'")[1]
+                seq_name = seq_results.split('.')[-1].strip('"')
+
+                # Get the existing sequence's properties
+                cursor.execute(f"""
+                    select sequencename, increment_by, min_value, max_value, start_value, cycle
+                    from pg_sequences 
+                    where schemaname = '{schema}' and sequencename = '{seq_name}';
+                """)
+                seq_properties = cursor.fetchone()
+
+                self.sequences.append({
+                    'name': seq_properties[0],
+                    'column': column[0],
+                    'increment': seq_properties[1],
+                    'minvalue': seq_properties[2],
+                    'maxvalue': seq_properties[3],
+                    'start': seq_properties[4],
+                    'cycle': ' cycle' if seq_properties[5] else ''
+                })
+
+    def get_table_metadata(self, table, schema):
+        """
+        Retrieves metadata for a given table.
+
+        This function retrieves various types of metadata for the specified table, 
+        including the schema, columns, constraints, indexes, and sequences. It uses 
+        several helper functions to retrieve each type of metadata.
+
+        :param table: The name of the table for which to retrieve the metadata.
+        :type table: str
+
+        :return: None. The metadata is stored in instance variables.
+        """
+        conn = self.get_conn()
+        cursor = conn.cursor()
+
         try:
-            cursor.execute(column_names_sql_query)
-            column_names_results = cursor.fetchall()
-
-            cursor.execute(constraints_sql_query)
-            constraints_results = cursor.fetchall()
-
-            cursor.execute(indexes_sql_query)
-            indexes_results = cursor.fetchall()
+            columns_results = self._get_table_columns(table, cursor)
+            constraints_results = self._get_table_constraints(table, cursor)
+            indexes_results = self._get_table_indexes(table, cursor)
+            self._get_table_sequences(cursor, schema, columns_results)
         except Exception as e:
-            self.log.critical("[_get_column_metadata] column_names_sql_query error: {}".format(e))
+            self.log.critical("[get_table_metadata] error: {}".format(e))
             raise e
         finally:
             conn.close()
-
-        self.serial_columns = []
-        for column in column_names_results:
-            if column[1] == 'integer' and column[2] is not None and 'nextval' in column[2]:
-                self.serial_columns.append(column[0])
         
-        self.columns_list = [column[0] for column in column_names_results if column[0] not in self.serial_columns]
-        self.constraints = constraints_results
-        constraints_names = [constraint[0] for constraint in constraints_results]
-        self.indexes = [index[0] for index in indexes_results if index[0] not in constraints_names]
+        self.constraints = [{'name': row[0], 'definition': row[1], 'type': row[2]} for row in constraints_results]
 
-        return self.columns_list
+        constraints_names = [constraint[0] for constraint in constraints_results]  
+        self.indexes = [{'name': index[0], 'definition': index[1]} for index in indexes_results if index[0] not in constraints_names]
+
+        non_sequential_columns = [column[0] for column in columns_results if column[0] not in [seq['column'] for seq in self.sequences]]
+
+        return non_sequential_columns
     
-    def _create_tmp_table(self, table):
+    def create_tmp_table(self, table):
         """
-        Create a temporary table based on the structure of the given table.
+        Creates a temporary table in the database.
 
-        :param table: The name of the table to base the temporary table on.
+        This function creates a temporary table in the database with the same 
+        structure as the specified table. Temporary tables are useful for 
+        performing operations that require a temporary workspace.
+
+        :param table: The name of the table to use as a template for the temporary table.
+        :type table: str
+
+        :return: None. The temporary table is created in the database.
         """
+
         prep_commands = []
-        tmp_table = f'Tmp{table}'
-        swap_table = f'Swap{table}'
+        self.tmp_table = f'Tmp{table}'
+        self.swap_table = f'Swap{table}'
 
+        # Drop old temp and swap tables if they exist
         prep_commands.extend([
-            f'drop table if exists "{tmp_table}";',
-            f'drop table if exists "{swap_table}";',
-            f'create table "{tmp_table}" (like "{table}" including all);',
+            f'drop table if exists "{self.tmp_table}" cascade;',
+            f'drop table if exists "{self.swap_table}" cascade;',
+            f'create table "{self.tmp_table}" (like "{table}" including all);'
         ])
-
-        for col in self.serial_columns:
-            prep_commands.append(f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";')
-
-        # have to add the foreign keys to the new table
-        for key in self.constraints:
-            if key[2] == 'f':
-                prep_commands.append(f'alter table if exists "{tmp_table}" add {key[1]};') 
         
-        self.log.info(prep_commands)
-        self._run_psql_commands_in_transaction(prep_commands)
+        # Create a temporary sequence for each sequence in the original table
+        for seq in self.sequences:
+            sequence_name = seq['name']
+            tmp_sequence_name = f'Tmp{sequence_name}'
+            prep_commands.extend([
+                f'drop sequence if exists "{tmp_sequence_name}" cascade;',
+                f'create sequence "{tmp_sequence_name}" increment {seq["increment"]} minvalue {seq["minvalue"]} maxvalue {seq["maxvalue"]} start {seq["start"]} {seq["cycle"]};',
+                f'alter table "{self.tmp_table}" alter column "{seq["column"]}" set default nextval(\'"{tmp_sequence_name}"\');'
+            ])
 
-    def _write_to_db(self, file, columns, table):
+        # Create a temporary foreign key for each foreign key in the original table
+        for constraint in self.constraints:
+            if constraint['type'] == 'f':
+                prep_commands.append(f'alter table "{self.tmp_table}" add constraint "Tmp{constraint["name"]}" {constraint["definition"]};')
+
+        self._run_psql_commands_in_transaction(prep_commands)
+        self._generate_drop_table_attributes_commands(self.tmp_table)
+
+    def write_to_db(self, file, columns, table):
         """
         Write data from a file to a table in the database.
 
@@ -135,45 +246,62 @@ class ExtendedPostgresHook(PostgresHook):
         file.seek(0)
         conn = self.get_conn()
         cursor = conn.cursor()
-        write_to_db_sql = f"copy \"{table}\" ({columns}) from stdin with csv delimiter '|' quote '\"' header null as ''"
+
+        self.log.info(table)
+        self.log.info(columns)
+
+        write_to_db_sql = f'copy "{table}" ({columns}) from stdin with csv delimiter \'|\' quote \'"\' header null as \'\''
+        
         self.log.info(f'writing command: {write_to_db_sql}')
         cursor.copy_expert(write_to_db_sql, file)
         conn.commit()
         conn.close()
     
-    def _swap_db_tables(self, table, prep_commands=None):
+    def swap_db_tables(self, table, prep_commands=None):
         """
-        Swap the names of the given table and a temporary table.
+        Swap the given table and a temporary table.
 
         :param table: The name of the table to swap with the temporary table.
+        :param prep_commands: The list of SQL commands to run. If this is not null, most of the logic gets skipped and the function simply deletes leftover temp tables and sequences
         """
-        tmp_table = f'Tmp{table}'
-        swap_table = f'Swap{table}'
 
         if prep_commands is None:
-            prep_commands = [
-                f'alter table if exists "{table}" rename to "{swap_table}";',
-                f'alter table if exists "{tmp_table}" rename to "{table}";',
-            ]      
+            prep_commands = []
 
-            for col in self.serial_columns:
-                prep_commands.extend([
-                    f'alter table if exists "{swap_table}" alter column "{col}" drop default;',
-                    f'alter sequence if exists "{table}_{col}_seq" owned by "{table}"."{col}";'
-                ])
+            # Drop the temporary constraints and indexe
+            prep_commands.extend(self.drop_constraint_commands)
+            prep_commands.extend(self.drop_index_commands)
             
-            prep_commands.append(f'drop table if exists "{swap_table}";')
+            for seq in self.sequences:
+                prep_commands.append(f'drop sequence if exists "{seq["name"]}" cascade;')
 
-            # have to rename the constraints to match the old table
-            for key in self.constraints:
-                prep_commands.append(f'alter table if exists "{table}" rename constraint "Tmp{key[0]}" to "{key[0]}";')  
-            
-            # have to rename the indexes to match the old table
+            # Swap the tables and drop the old table
+            prep_commands.extend([
+                f'alter table if exists "{table}" rename to "{self.swap_table}";',
+                f'alter table if exists "{self.tmp_table}" rename to "{table}";',
+                f'drop table if exists "{self.swap_table}" cascade;'
+            ])
+
+            # Add the correctly named constraints, indexes, and sequences
+            for constraint in self.constraints:
+                prep_commands.append(f'alter table if exists "{table}" add constraint "{constraint["name"]}" {constraint["definition"]};')
+
             for index in self.indexes:
-                prep_commands.append(f'alter index if exists "Tmp{index}" rename to "{index}";')
+                prep_commands.append(f'create index "{index["name"]}" on "{table}" {index["definition"]};')
+            
+            for seq in self.sequences:
+                sequence_name = seq['name']
+                tmp_sequence_name = f'Tmp{sequence_name}'
+                prep_commands.extend([
+                    f'alter sequence "{tmp_sequence_name}" rename to "{sequence_name}";'
+                    f'alter table "{table}" alter column "{seq["column"]}" set default nextval(\'"{sequence_name}"\');'
+                ])
         
         else:
-            prep_commands.append(f'drop table if exists "{tmp_table}";')
+            prep_commands.append(f'drop table if exists "{self.tmp_table}" cascade;')
+            for seq in self.sequences:
+                sequence_name = seq['name']
+                tmp_sequence_name = f'Tmp{sequence_name}'
+                prep_commands.append(f'drop sequence if exists "{tmp_sequence_name}" cascade;')
 
-        self.log.info(prep_commands)
         self._run_psql_commands_in_transaction(prep_commands)

@@ -36,10 +36,10 @@ class TestSnowflakeToPostgresOperator(unittest.TestCase):
 
         # Assert the expected interactions with Postgres hook
         self.mock_postgres_hook.assert_called_once_with(postgres_conn_id='postgres_default', pool_pre_ping=True)
-        self.mock_postgres_hook.return_value._get_column_metadata.assert_called_once_with(self.operator.postgres_table)
-        self.mock_postgres_hook.return_value._create_tmp_table.assert_called_once_with(self.operator.postgres_table)
-        self.mock_postgres_hook.return_value._write_to_db.assert_called_once_with(ANY, ANY, f'Tmp{self.operator.postgres_table}')
-        self.mock_postgres_hook.return_value._swap_db_tables.assert_called_once_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.get_table_metadata.assert_called_once_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.create_tmp_table.assert_called_once_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.write_to_db.assert_called_once_with(ANY, ANY, f'Tmp{self.operator.postgres_table}')
+        self.mock_postgres_hook.return_value.swap_db_tables.assert_called_once_with(self.operator.postgres_table)
 
 class TestSnowflakeToPostgresBookmarkOperator(unittest.TestCase):
     def setUp(self):
@@ -77,10 +77,10 @@ class TestSnowflakeToPostgresBookmarkOperator(unittest.TestCase):
 
         # Assert the expected interactions with Postgres hook
         self.mock_postgres_hook.assert_called_once_with(postgres_conn_id='postgres_default', pool_pre_ping=True)
-        self.mock_postgres_hook.return_value._get_column_metadata.assert_called_with(self.operator.postgres_table)
-        self.mock_postgres_hook.return_value._create_tmp_table.assert_called_once_with(self.operator.postgres_table)
-        self.mock_postgres_hook.return_value._write_to_db.assert_called_once_with(ANY, ANY, f'Tmp{self.operator.postgres_table}')
-        self.mock_postgres_hook.return_value._swap_db_tables.assert_called_once_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.get_table_metadata.assert_called_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.create_tmp_table.assert_called_once_with(self.operator.postgres_table)
+        self.mock_postgres_hook.return_value.write_to_db.assert_called_once_with(ANY, ANY, f'Tmp{self.operator.postgres_table}')
+        self.mock_postgres_hook.return_value.swap_db_tables.assert_called_once_with(self.operator.postgres_table)
 
         # Assert the generated Snowflake queries
         expected_snowflake_query = 'with inner_cte as (SELECT * FROM my_snowflake_table) select * from inner_cte where updated_at > 2021-01-11 12:00:00.000'

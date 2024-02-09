@@ -46,7 +46,7 @@ class StitchMonitorSourceSensor(BaseSensorOperator):
 
         tic = datetime.now()
 
-        self.stitch_hook._get_credentials()
+        self.stitch_hook.get_credentials()
 
         logging.info(f'Monitoring source: source_id = {self.source_id}')
-        self.stitch_hook._monitor_extraction(sleep_time=self.sleep_time, timeout=self.timeout, source_id=self.source_id, client_id=self.client_id, start_time=tic)
+        self.stitch_hook.monitor_extraction(sleep_time=self.sleep_time, timeout=self.timeout, source_id=self.source_id, client_id=self.client_id, start_time=tic)

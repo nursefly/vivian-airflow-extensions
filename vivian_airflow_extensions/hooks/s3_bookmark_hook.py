@@ -28,7 +28,7 @@ class S3BookmarkHook(BaseHook):
         self.bookmark_s3_key = bookmark_s3_key
         self.incremental_key_type = incremental_key_type   
 
-    def _get_latest_bookmark(self):
+    def get_latest_bookmark(self):
         """
         Get the latest bookmark from S3.
 
@@ -51,7 +51,7 @@ class S3BookmarkHook(BaseHook):
 
         return key  
 
-    def _save_next_bookmark(self, bookmark):
+    def save_next_bookmark(self, bookmark):
         """
         Save the next bookmark to S3.
 

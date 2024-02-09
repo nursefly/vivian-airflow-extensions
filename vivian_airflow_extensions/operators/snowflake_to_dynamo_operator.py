@@ -263,11 +263,11 @@ class SnowflakeToDynamoBookmarkOperator(SnowflakeToDynamoOperator):
 
     def execute(self, context):
         s3_bookmark_hook = S3BookmarkHook(bookmark_s3_key=self.bookmark_s3_key, incremental_key_type=self.incremental_key_type)
-        latest_bookmark = s3_bookmark_hook._get_latest_bookmark()
+        latest_bookmark = s3_bookmark_hook.get_latest_bookmark()
         self.snowflake_query = f'with inner_cte as ({self.snowflake_query}) select * from inner_cte where {self.incremental_key} > {latest_bookmark}'
         bookmark_query = f'with outer_cte as ({self.snowflake_query}) select max({self.incremental_key}) as "bookmark" from outer_cte'
         next_bookmark = self.snowflake_hook.run(sql=bookmark_query, handler=lambda cursor: cursor.fetchall())[0]['bookmark']
 
         super().execute(context)
 
-        s3_bookmark_hook._save_next_bookmark(next_bookmark) 
+        s3_bookmark_hook.save_next_bookmark(next_bookmark) 

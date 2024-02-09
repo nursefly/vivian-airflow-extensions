@@ -59,6 +59,9 @@ class ExtendedSnowflakeHook(SnowflakeHook):
         if destination_type not in ['snowflake', 'postgres']:
             raise AirflowException(f'destination_type must be one of ["snowflake", "postgres"], not {destination_type}')
 
+        self.log.info('START save_snowflake_results_to_tmp_file')
+        self.log.info(f'Query: {query}')
+
         rows_generator = self.generate_rows_from_table(query)
         headers_written = False
 

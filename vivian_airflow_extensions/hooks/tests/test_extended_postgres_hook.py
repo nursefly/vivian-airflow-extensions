@@ -23,13 +23,13 @@ class TestExtendedPostgresHook(unittest.TestCase):
         mock_conn.close.assert_called_once()
 
     @patch.object(PostgresHook, 'get_conn')
-    def test_get_column_metadata(self, mock_get_conn):
+    def test_get_table_metadata(self, mock_get_conn):
         mock_conn = MagicMock()
         mock_get_conn.return_value = mock_conn
         mock_conn.cursor().fetchall.side_effect = [[('id', 'integer', 'nextval')], [], []]
 
         hook = ExtendedPostgresHook()
-        columns = hook._get_column_metadata('test_table')
+        columns = hook.get_table_metadata('test_table')
 
         self.assertEqual(columns, [])
         self.assertEqual(hook.serial_columns, ['id'])
@@ -40,7 +40,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         hook.serial_columns = ['id']
         hook.constraints = [('test_constraint', 'test_def', 'f')]
 
-        hook._create_tmp_table('test_table')
+        hook.create_tmp_table('test_table')
 
         mock_run_psql_commands_in_transaction.assert_called_once()
 
@@ -50,7 +50,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         mock_get_conn.return_value = mock_conn
 
         hook = ExtendedPostgresHook()
-        hook._write_to_db(MagicMock(), 'id', 'test_table')
+        hook.write_to_db(MagicMock(), 'id', 'test_table')
 
         mock_conn.cursor().copy_expert.assert_called_once()
         mock_conn.commit.assert_called_once()
@@ -63,7 +63,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         hook.constraints = [('test_constraint', 'test_def', 'f')]
         hook.indexes = ['test_index']
 
-        hook._swap_db_tables('test_table')
+        hook.swap_db_tables('test_table')
 
         mock_run_psql_commands_in_transaction.assert_called_once()
 
@@ -83,7 +83,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         mock_conn.close.assert_called_once()
 
     @patch.object(PostgresHook, 'get_conn')
-    def test_get_column_metadata_error(self, mock_get_conn):
+    def test_get_table_metadata_error(self, mock_get_conn):
         mock_conn = MagicMock()
         mock_get_conn.return_value = mock_conn
         mock_conn.cursor().execute.side_effect = Exception('Test exception')
@@ -91,7 +91,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         hook = ExtendedPostgresHook()
 
         with self.assertRaises(Exception) as context:
-            hook._get_column_metadata('test_table')
+            hook.get_table_metadata('test_table')
 
         self.assertTrue('Test exception' in str(context.exception))
         mock_conn.close.assert_called_once()
@@ -105,7 +105,7 @@ class TestExtendedPostgresHook(unittest.TestCase):
         hook = ExtendedPostgresHook()
 
         with self.assertRaises(Exception) as context:
-            hook._write_to_db(MagicMock(), 'id', 'test_table')
+            hook.write_to_db(MagicMock(), 'id', 'test_table')
 
         self.assertTrue('Test exception' in str(context.exception))
 
