@@ -19,7 +19,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
 
     @apply_defaults
     def __init__(self, postgres_table: str=None, snowflake_query: str=None, array_fields: list=[], snowflake_conn_id='snowflake_default', 
-                 postgres_conn_id='postgres_default', schema: str='public', *args, **kwargs) -> None:
+                 postgres_conn_id='postgres_default', schema: str='public', include_autoincrement_keys=False, *args, **kwargs) -> None:
         """
         Initialize a new instance of SnowflakeToPostgresOperator.
 
@@ -46,6 +46,7 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.snowflake_hook = ExtendedSnowflakeHook(snowflake_conn_id=self.snowflake_conn_id, pool_pre_ping=True)
         self.postgres_hook = ExtendedPostgresHook(postgres_conn_id=self.postgres_conn_id, pool_pre_ping=True)
         self.metadata_retrieved = False
+        self.include_autoincrement_keys = include_autoincrement_keys
 
     def execute(self, context):
         with NamedTemporaryFile('w+') as file:
@@ -57,9 +58,9 @@ class SnowflakeToPostgresOperator(BaseOperator):
 
             self.log.info('START get column list')
             if not self.metadata_retrieved:
-                self.non_sequential_columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema)
+                self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
                 self.metadata_retrieved = True
-            columns_string = ", ".join([f'"{col}"' for col in self.non_sequential_columns_list])
+            columns_string = ", ".join([f'"{col}"' for col in self.columns_list])
 
             self.log.info('START create tmp table')
             self.postgres_hook.create_tmp_table(self.postgres_table)        
@@ -96,9 +97,9 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = ''
         else:
             if self.columns_to_update is None:
-                self.non_sequential_columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema)
+                self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
                 self.metadata_retrieved = True
-                self.columns_to_update = [col for col in self.non_sequential_columns_list if col not in self.primary_key_columns]
+                self.columns_to_update = [col for col in self.columns_list if col not in self.primary_key_columns]
                 
             columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update])
             primary_key_columns_string = ", ".join(['"' + col + '"' for col in self.primary_key_columns])

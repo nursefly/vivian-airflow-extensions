@@ -59,24 +59,24 @@ class ExtendedPostgresHook(PostgresHook):
         conn = self.get_conn()
         cursor = conn.cursor()
 
-        # Generate commands to drop all constraints from the table
+        # Fetch all constraint names from the table
         cursor.execute(f"""
-            select 'alter table "{table}" drop constraint if exists "' || conname || '";'
+            select conname
             from pg_constraint 
             inner join pg_class on conrelid=pg_class.oid 
             where relname='{table}';
         """)
 
-        self.drop_constraint_commands = [row[0] for row in cursor.fetchall()]
+        self.drop_constraint_commands = [f'alter table "{table}" drop constraint if exists "{row[0]}";' for row in cursor.fetchall() if row[0]]
 
-        # Generate commands to drop all indexes from the table
+        # Fetch all index names from the table
         cursor.execute(f"""
-            select 'drop index if exists "' || indexname || '";'
+            select indexname
             from pg_indexes 
             where tablename='{table}';
         """)
 
-        self.drop_index_commands = [row[0] for row in cursor.fetchall() if row[0]]
+        self.drop_index_commands = [f'drop index if exists "{row[0]}";' for row in cursor.fetchall() if row[0]]
     
     def _get_table_columns(self, table, cursor):
         columns_sql_query = f"""
@@ -134,13 +134,13 @@ class ExtendedPostgresHook(PostgresHook):
         self.sequences = []
         for column in columns_results:
             # Checks if the column is a sequence
-            if column[1] == 'integer' and column[2] is not None and 'nextval' in column[2]:
+            if column[1] in ['integer', 'smallint', 'bigint'] and column[2] is not None and 'nextval' in column[2]:
                 seq_results = column[2].split("'")[1]
                 seq_name = seq_results.split('.')[-1].strip('"')
 
                 # Get the existing sequence's properties
                 cursor.execute(f"""
-                    select sequencename, increment_by, min_value, max_value, start_value, cycle
+                    select sequencename, increment_by, min_value, max_value, last_value, cycle, 
                     from pg_sequences 
                     where schemaname = '{schema}' and sequencename = '{seq_name}';
                 """)
@@ -152,11 +152,11 @@ class ExtendedPostgresHook(PostgresHook):
                     'increment': seq_properties[1],
                     'minvalue': seq_properties[2],
                     'maxvalue': seq_properties[3],
-                    'start': seq_properties[4],
-                    'cycle': ' cycle' if seq_properties[5] else ''
+                    'last': seq_properties[4],
+                    'cycle': ' cycle' if seq_properties[5] else '',
                 })
 
-    def get_table_metadata(self, table, schema):
+    def get_table_metadata(self, table, schema, include_autoincrement_keys):
         """
         Retrieves metadata for a given table.
 
@@ -188,9 +188,12 @@ class ExtendedPostgresHook(PostgresHook):
         constraints_names = [constraint[0] for constraint in constraints_results]  
         self.indexes = [{'name': index[0], 'definition': index[1]} for index in indexes_results if index[0] not in constraints_names]
 
-        non_sequential_columns = [column[0] for column in columns_results if column[0] not in [seq['column'] for seq in self.sequences]]
+        if include_autoincrement_keys:
+            columns_list = [column[0] for column in columns_results]
+        else:
+            columns_list = [column[0] for column in columns_results if column[0] not in [seq['column'] for seq in self.sequences]]
 
-        return non_sequential_columns
+        return columns_list
     
     def create_tmp_table(self, table):
         """
@@ -223,7 +226,7 @@ class ExtendedPostgresHook(PostgresHook):
             tmp_sequence_name = f'Tmp{sequence_name}'
             prep_commands.extend([
                 f'drop sequence if exists "{tmp_sequence_name}" cascade;',
-                f'create sequence "{tmp_sequence_name}" increment {seq["increment"]} minvalue {seq["minvalue"]} maxvalue {seq["maxvalue"]} start {seq["start"]} {seq["cycle"]};',
+                f'create sequence "{tmp_sequence_name}" increment {seq["increment"]} minvalue {seq["minvalue"]} maxvalue {seq["maxvalue"]} last_value {seq["last"]} {seq["cycle"]};',
                 f'alter table "{self.tmp_table}" alter column "{seq["column"]}" set default nextval(\'"{tmp_sequence_name}"\');'
             ])
 
@@ -235,12 +238,12 @@ class ExtendedPostgresHook(PostgresHook):
         self._run_psql_commands_in_transaction(prep_commands)
         self._generate_drop_table_attributes_commands(self.tmp_table)
 
-    def write_to_db(self, file, columns, table):
+    def write_to_db(self, file, columns_string, table):
         """
         Write data from a file to a table in the database.
 
         :param file: The file containing the data to write.
-        :param columns: The columns to write the data to.
+        :param columns_string: The columns to write the data to.
         :param table: The table to write the data to.
         """
         file.seek(0)
@@ -248,9 +251,9 @@ class ExtendedPostgresHook(PostgresHook):
         cursor = conn.cursor()
 
         self.log.info(table)
-        self.log.info(columns)
+        self.log.info(columns_string)
 
-        write_to_db_sql = f'copy "{table}" ({columns}) from stdin with csv delimiter \'|\' quote \'"\' header null as \'\''
+        write_to_db_sql = f'copy "{table}" ({columns_string}) from stdin with csv delimiter \'|\' quote \'"\' header null as \'\''
         
         self.log.info(f'writing command: {write_to_db_sql}')
         cursor.copy_expert(write_to_db_sql, file)
