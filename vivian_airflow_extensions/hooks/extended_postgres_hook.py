@@ -153,7 +153,7 @@ class ExtendedPostgresHook(PostgresHook):
                     'increment': seq_properties[1],
                     'minvalue': seq_properties[2],
                     'maxvalue': seq_properties[3],
-                    'last': seq_properties[4],
+                    'last': seq_properties[4] if seq_properties[4] is not None else seq_properties[2],
                     'cycle': ' cycle' if seq_properties[5] else '',
                 })
 
