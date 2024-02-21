@@ -85,7 +85,8 @@ class ExtendedPostgresHook(PostgresHook):
                 data_type, 
                 column_default 
             from information_schema.columns 
-            where table_name = '{table}';
+            where table_name = '{table}'
+            order by ordinal_position;
         """
 
         cursor.execute(columns_sql_query)
