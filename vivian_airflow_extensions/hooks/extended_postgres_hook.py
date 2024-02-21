@@ -85,7 +85,8 @@ class ExtendedPostgresHook(PostgresHook):
                 data_type, 
                 column_default 
             from information_schema.columns 
-            where table_name = '{table}';
+            where table_name = '{table}'
+            order by ordinal_position;
         """
 
         cursor.execute(columns_sql_query)
@@ -152,7 +153,7 @@ class ExtendedPostgresHook(PostgresHook):
                     'increment': seq_properties[1],
                     'minvalue': seq_properties[2],
                     'maxvalue': seq_properties[3],
-                    'last': seq_properties[4],
+                    'last': seq_properties[4] if seq_properties[4] is not None else seq_properties[2],
                     'cycle': ' cycle' if seq_properties[5] else '',
                 })
 

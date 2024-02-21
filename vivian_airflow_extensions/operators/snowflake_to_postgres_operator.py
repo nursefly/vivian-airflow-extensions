@@ -110,7 +110,10 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         if self.columns_to_update is None:
             self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
-            column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
+            if self.include_autoincrement_keys:
+                column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update])
+            else:
+                column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
             self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause};']
 
         super().execute(context)
