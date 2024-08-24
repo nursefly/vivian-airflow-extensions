@@ -216,10 +216,8 @@ class ExtendedPostgresHook(PostgresHook):
 
         # Drop old temp and swap tables if they exist
         prep_commands.extend([
-            "set local statement_timeout = '50s';",
             f'drop table if exists "{self.tmp_table}" cascade;',
             f'drop table if exists "{self.swap_table}" cascade;',
-            'reset statement_timeout;',
             f'create table "{self.tmp_table}" (like "{table}" including all);'
         ])
         
@@ -285,9 +283,7 @@ class ExtendedPostgresHook(PostgresHook):
             prep_commands.extend([
                 f'alter table if exists "{table}" rename to "{self.swap_table}";',
                 f'alter table if exists "{self.tmp_table}" rename to "{table}";',
-                "set local statement_timeout = '50s';",
-                f'drop table if exists "{self.swap_table}" cascade;',
-                'reset statement_timeout;'
+                f'drop table if exists "{self.swap_table}" cascade;'
             ])
 
             # Add the correctly named constraints, indexes, and sequences
@@ -306,11 +302,7 @@ class ExtendedPostgresHook(PostgresHook):
                 ])
         
         else:
-            prep_commands.extend([
-                "set local statement_timeout = '50s';",
-                f'drop table if exists "{self.tmp_table}" cascade;',
-                'reset statement_timeout;'
-            ])
+            prep_commands.append(f'drop table if exists "{self.tmp_table}" cascade;')
             for seq in self.sequences:
                 sequence_name = seq['name']
                 tmp_sequence_name = f'Tmp{sequence_name}'
