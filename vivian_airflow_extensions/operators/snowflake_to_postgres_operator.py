@@ -141,7 +141,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = f'on conflict({primary_key_columns_string}) do update set {columns_to_update_string}'
 
             if self.conditional_psql_timestamp_column is not None:
-                conditional_timestamp_clause = f'where excluded."{self.conditional_psql_timestamp_column}" >= "{self.postgres_table}"."{self.conditional_psql_timestamp_column}"'
+                conditional_timestamp_clause = f'where excluded."{self.conditional_psql_timestamp_column}" >= source."{self.conditional_psql_timestamp_column}"'
             else:
                 conditional_timestamp_clause = ''
 
