@@ -132,9 +132,9 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             columns_to_update_array = []
             for column in self.columns_to_update:
                 if self.insert_only_columns is not None and column in self.insert_only_columns:
-                    line = f'"{col}"=coalesce(source."{col}", excluded."{col}")'
+                    line = f'"{column}"=coalesce(source."{column}", excluded."{column}")'
                 else:
-                    line = f'"{col}"=excluded."{col}"'
+                    line = f'"{column}"=excluded."{column}"'
                 columns_to_update_array.append(line)
             columns_to_update_string = ", ".join(columns_to_update_array)
             primary_key_columns_string = ", ".join(['"' + col + '"' for col in self.primary_key_columns])
