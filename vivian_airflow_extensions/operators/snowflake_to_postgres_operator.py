@@ -108,13 +108,14 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             if self.primary_key_columns is None:
                 raise ValueError("insert_only_columns requires using primary_key_columns.")
 
-            for column in self.insert_only_columns:
-                if column not in self.columns_to_update:
-                    raise ValueError(
-                        "When using both columns_to_update and insert_only_columns, all"
-                        f" insert_only_columns must appear in columns_to_update. {column}"
-                        " is missing."
-                    )
+            if self.columns_to_update is not None:
+                for column in self.insert_only_columns:
+                    if column not in self.columns_to_update:
+                        raise ValueError(
+                            "When using both columns_to_update and insert_only_columns, all"
+                            f" insert_only_columns must appear in columns_to_update. {column}"
+                            " is missing."
+                        )
 
     def execute(self, context):
         # this if/else statement assigns the on conflict clause, if any
@@ -130,7 +131,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
 
             columns_to_update_array = []
             for column in self.columns_to_update:
-                if column in self.insert_only_columns:
+                if self.insert_only_columns is not None and column in self.insert_only_columns:
                     line = f'"{col}"=coalesce(source."{col}", excluded."{col}")'
                 else:
                     line = f'"{col}"=excluded."{col}"'
@@ -156,6 +157,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             self.insert_commands = [f'insert into "{self.postgres_table}" as source ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
 
         super().execute(context)
+
 
 class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOperator):
     """
