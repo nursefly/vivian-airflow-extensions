@@ -79,18 +79,42 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
     template_fields = ['snowflake_query']
     
     @apply_defaults
-    def __init__(self, primary_key_columns: List[str]=None, columns_to_update: List[str]=None, conditional_psql_timestamp_column: str=None, *args, **kwargs) -> None:
+    def __init__(self, primary_key_columns: List[str]=None, columns_to_update: List[str]=None, conditional_psql_timestamp_column: str=None, insert_only_columns: List[str]=None,
+                 *args, **kwargs) -> None:
         """
         Initialize a new instance of SnowflakeToPostgresMergeIncrementalOperator.
 
         :param primary_key_columns: The primary key columns to use for merging.
         :param columns_to_update: The columns to update.
+        :param conditional_psql_timestamp_column: If set, skip updating rows where
+            the conditional_psql_timestamp_column in the Postgres table is ahead of
+            the same column in the Snowflake table.
+        :param insert_only_columns: If set, these columns will only be updated with
+            new data if the existing column is null. If the row is inserted these
+            columns will still be included. primary_key_columns must also be set if
+            using this option, and all columns must appear in columns_to_update if
+            you're also using that.
         """
         super().__init__(*args, **kwargs)
 
         self.primary_key_columns = primary_key_columns
         self.columns_to_update = columns_to_update
         self.conditional_psql_timestamp_column = conditional_psql_timestamp_column
+        self.insert_only_columns = insert_only_columns
+
+    def _validate_insert_only_columns(self):
+        if self.insert_only_columns is not None:
+            if self.primary_key_columns is None:
+                raise ValueError("insert_only_columns requires using primary_key_columns.")
+
+            if self.columns_to_update is not None:
+                for column in self.insert_only_columns:
+                    if column not in self.columns_to_update:
+                        raise ValueError(
+                            "When using both columns_to_update and insert_only_columns, all"
+                            f" insert_only_columns must appear in columns_to_update. {column}"
+                            " is missing."
+                        )
 
     def execute(self, context):
         # this if/else statement assigns the on conflict clause, if any
@@ -102,8 +126,16 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
                 self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
                 self.metadata_retrieved = True
                 self.columns_to_update = [col for col in self.columns_list if col not in self.primary_key_columns]
-                
-            columns_to_update_string = ", ".join([f'"{col}"=excluded."{col}"' for col in self.columns_to_update])
+            self._validate_insert_only_columns()
+
+            columns_to_update_array = []
+            for column in self.columns_to_update:
+                if self.insert_only_columns is not None and column in self.insert_only_columns:
+                    line = f'"{column}"=coalesce("{self.postgres_table}"."{column}", excluded."{column}")'
+                else:
+                    line = f'"{column}"=excluded."{column}"'
+                columns_to_update_array.append(line)
+            columns_to_update_string = ", ".join(columns_to_update_array)
             primary_key_columns_string = ", ".join(['"' + col + '"' for col in self.primary_key_columns])
             on_conflict_clause = f'on conflict({primary_key_columns_string}) do update set {columns_to_update_string}'
 
@@ -124,6 +156,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
 
         super().execute(context)
+
 
 class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOperator):
     """
