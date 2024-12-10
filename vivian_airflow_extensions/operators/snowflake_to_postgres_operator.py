@@ -101,7 +101,6 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         self.columns_to_update = columns_to_update
         self.conditional_psql_timestamp_column = conditional_psql_timestamp_column
         self.insert_only_columns = insert_only_columns
-        self._validate_insert_only_columns()
 
     def _validate_insert_only_columns(self):
         if self.insert_only_columns is not None:
@@ -127,12 +126,12 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
                 self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
                 self.metadata_retrieved = True
                 self.columns_to_update = [col for col in self.columns_list if col not in self.primary_key_columns]
-                self._validate_insert_only_columns()
+            self._validate_insert_only_columns()
 
             columns_to_update_array = []
             for column in self.columns_to_update:
                 if self.insert_only_columns is not None and column in self.insert_only_columns:
-                    line = f'"{column}"=coalesce(source."{column}", excluded."{column}")'
+                    line = f'"{column}"=coalesce("{self.postgres_table}"."{column}", excluded."{column}")'
                 else:
                     line = f'"{column}"=excluded."{column}"'
                 columns_to_update_array.append(line)
@@ -141,20 +140,20 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             on_conflict_clause = f'on conflict({primary_key_columns_string}) do update set {columns_to_update_string}'
 
             if self.conditional_psql_timestamp_column is not None:
-                conditional_timestamp_clause = f'where excluded."{self.conditional_psql_timestamp_column}" >= source."{self.conditional_psql_timestamp_column}"'
+                conditional_timestamp_clause = f'where excluded."{self.conditional_psql_timestamp_column}" >= "{self.postgres_table}"."{self.conditional_psql_timestamp_column}"'
             else:
                 conditional_timestamp_clause = ''
 
         tmp_table = f'Tmp{self.postgres_table}'
 
         if self.columns_to_update is None:
-            self.insert_commands = [f'insert into "{self.postgres_table}" as source select * from "{tmp_table}" {on_conflict_clause};']
+            self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
             if self.include_autoincrement_keys:
                 column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update])
             else:
                 column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
-            self.insert_commands = [f'insert into "{self.postgres_table}" as source ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
+            self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
 
         super().execute(context)
 
