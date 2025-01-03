@@ -201,7 +201,7 @@ class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOpe
         self.xcom_push(
             context,
             key='previous_bookmark',
-            value=latest_bookmark
+            value=latest_bookmark.replace("'", "")
         )
         self.xcom_push(
             context,
