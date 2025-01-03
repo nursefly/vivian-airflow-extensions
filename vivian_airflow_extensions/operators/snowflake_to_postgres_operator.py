@@ -199,10 +199,12 @@ class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOpe
         self.s3_bookmark_hook.save_next_bookmark(next_bookmark)
 
         self.xcom_push(
+            context,
             key='previous_bookmark',
             value=latest_bookmark
         )
         self.xcom_push(
+            context,
             key='next_bookmark',
             value=next_bookmark
         )
