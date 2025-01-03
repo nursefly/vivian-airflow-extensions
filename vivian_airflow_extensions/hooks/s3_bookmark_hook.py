@@ -9,6 +9,7 @@ class S3BookmarkHook(BaseHook):
     This class interacts with S3 to get and save bookmarks.
     """
     template_fields = ['bookmark_s3_key']
+    format_string = '%Y-%m-%d %H:%M:%S'
 
     @apply_defaults
     def __init__(self, bookmark_s3_key: str=None, incremental_key_type: str=None, *args, **kwargs) -> None:
@@ -61,7 +62,7 @@ class S3BookmarkHook(BaseHook):
             self.log.info('Bookmark is None, not saving it')
             return
         else:
-            bookmark = bookmark.strftime('%Y-%m-%d %H:%M:%S')
+            bookmark = bookmark.strftime(self.format_string)
 
         s3 = s3fs.S3FileSystem(anon=False)
 
