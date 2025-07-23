@@ -72,6 +72,26 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.log.info('START swap db tables')
         self.postgres_hook.swap_db_tables(self.postgres_table, self.insert_commands)
 
+
+class SnowflakeToPostgresAppendOperator(SnowflakeToPostgresOperator):
+    """
+    This class extends the SnowflakeToPostgresOperator to provide simple append-only functionality.
+    """
+    
+    @apply_defaults
+    def __init__(self, *args, **kwargs) -> None:
+        """
+        Initialize a new instance of SnowflakeToPostgresAppendOperator.
+        """
+        super().__init__(*args, **kwargs)
+    
+    def execute(self, context):
+        tmp_table = f'Tmp{self.postgres_table}'
+        self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}";']
+        
+        super().execute(context)
+
+
 class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
     """
     This class extends the SnowflakeToPostgresOperator to provide functionality for merging incremental changes from Snowflake to Postgres.
