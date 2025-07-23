@@ -149,10 +149,13 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         if self.columns_to_update is None:
             self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
         else:
+            # FIXED: Properly respect include_autoincrement_keys parameter
             if self.include_autoincrement_keys:
-                column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update])
-            else:
+                # include_autoincrement_keys=True: include auto-increment columns in INSERT
                 column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
+            else:
+                # include_autoincrement_keys=False: exclude auto-increment columns from INSERT
+                column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update])
             self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
 
         super().execute(context)
