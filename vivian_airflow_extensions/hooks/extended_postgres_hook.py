@@ -25,21 +25,22 @@ class ExtendedPostgresHook(PostgresHook):
         """
         conn = self.get_conn()
         cursor = conn.cursor()
-        self.log.debug('[_run_psql_commands_in_transaction] -  running commands')
-        self.log.info('\n' + '\n'.join(f"    {command}" for command in commands))
+        self.log.debug('[_run_psql_commands_in_transaction] - running %d commands', len(commands))
+        # Detailed SQL is noisy; keep at DEBUG
+        for command in commands:
+            self.log.debug('[psql] %s', command)
 
         try:
             for cmd in commands:
-                self.log.debug('[_run_psql_commands_in_transaction] : cmd %s', cmd)
                 cursor.execute(cmd)
             conn.commit()
         except Exception as e:
             conn.rollback()
-            self.log.critical("[_run_psql_commands_in_transaction] error: {}".format(e))
-            print(cmd)
+            self.log.critical("[_run_psql_commands_in_transaction] error executing: %s", cmd)
+            self.log.exception(e)
             raise e
         finally:
-            self.log.debug('[_run_psql_commands_in_transaction] -  closing conn')
+            self.log.debug('[_run_psql_commands_in_transaction] - closing conn')
             conn.close()
     
     def _generate_drop_table_attributes_commands(self, table):
@@ -251,12 +252,12 @@ class ExtendedPostgresHook(PostgresHook):
         conn = self.get_conn()
         cursor = conn.cursor()
 
-        self.log.info(table)
-        self.log.info(columns_string)
+        # High-signal summary only
+        self.log.info('COPY into %s (columns=%d)', table, len(columns_string.split(',')))
 
         write_to_db_sql = f'copy "{table}" ({columns_string}) from stdin with csv delimiter \'|\' quote \'"\' header null as \'\''
         
-        self.log.info(f'writing command: {write_to_db_sql}')
+        self.log.debug('COPY command: %s', write_to_db_sql)
         cursor.copy_expert(write_to_db_sql, file)
         conn.commit()
         conn.close()
