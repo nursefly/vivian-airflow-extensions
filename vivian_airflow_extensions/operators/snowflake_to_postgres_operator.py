@@ -50,26 +50,26 @@ class SnowflakeToPostgresOperator(BaseOperator):
 
     def execute(self, context):
         with NamedTemporaryFile('w+') as file:
-            self.log.info('START get snowflake data')
+            self.log.info('Fetching Snowflake data → temp file')
             new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(self.snowflake_query, self.array_fields, file, 'postgres')
             if not new_data:
-                self.log.info('Query returned no data, exiting')
+                self.log.info('Snowflake query returned no rows; skipping load')
                 return
 
-            self.log.info('START get column list')
+            self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
             if not self.metadata_retrieved:
                 self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
                 self.metadata_retrieved = True
             columns_string = ", ".join([f'"{col}"' for col in self.columns_list])
 
-            self.log.info('START create tmp table')
+            self.log.info('Creating temp table for %s', self.postgres_table)
             self.postgres_hook.create_tmp_table(self.postgres_table)        
 
-            self.log.info('START write to DB')
+            self.log.info('COPY temp file → %s', f'Tmp{self.postgres_table}')
             tmp_table = f'Tmp{self.postgres_table}'
             self.postgres_hook.write_to_db(file, columns_string, tmp_table)
 
-        self.log.info('START swap db tables')
+        self.log.info('Swapping temp → live table %s', self.postgres_table)
         self.postgres_hook.swap_db_tables(self.postgres_table, self.insert_commands)
 
 class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
@@ -80,7 +80,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
     
     @apply_defaults
     def __init__(self, primary_key_columns: List[str]=None, columns_to_update: List[str]=None, conditional_psql_timestamp_column: str=None, insert_only_columns: List[str]=None,
-                 *args, **kwargs) -> None:
+                 batch_size: int=5000, *args, **kwargs) -> None:
         """
         Initialize a new instance of SnowflakeToPostgresMergeIncrementalOperator.
 
@@ -101,6 +101,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
         self.columns_to_update = columns_to_update
         self.conditional_psql_timestamp_column = conditional_psql_timestamp_column
         self.insert_only_columns = insert_only_columns
+        self.batch_size = batch_size
 
     def _validate_insert_only_columns(self):
         if self.insert_only_columns is not None:
@@ -117,7 +118,7 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
                         )
 
     def execute(self, context):
-        # this if/else statement assigns the on conflict clause, if any
+        # Build ON CONFLICT and optional WHERE clause
         if self.primary_key_columns is None:
             on_conflict_clause = ''
             conditional_timestamp_clause = ''
@@ -146,15 +147,88 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
 
         tmp_table = f'Tmp{self.postgres_table}'
 
+        # Build the base insert SQL (used for single or as template for batches)
         if self.columns_to_update is None:
-            self.insert_commands = [f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause};']
+            base_insert_sql = f'insert into "{self.postgres_table}" select * from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause}'
         else:
             if self.include_autoincrement_keys:
                 column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update])
             else:
                 column_list = ', '.join(['"' + col + '"' for col in self.columns_to_update + self.primary_key_columns])
-            self.insert_commands = [f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause};']
+            base_insert_sql = f'insert into "{self.postgres_table}" ({column_list}) select {column_list} from "{tmp_table}" {on_conflict_clause} {conditional_timestamp_clause}'
 
+        # If batching is enabled with a single primary key, load tmp table here and run batched upserts immediately
+        if self.batch_size and self.primary_key_columns is not None and len(self.primary_key_columns) == 1:
+            pk = self.primary_key_columns[0]
+
+            from tempfile import NamedTemporaryFile
+            with NamedTemporaryFile('w+') as file:
+                self.log.info('Fetching Snowflake data → temp file')
+                new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(self.snowflake_query, self.array_fields, file, 'postgres')
+                if not new_data:
+                    self.log.info('Snowflake query returned no rows; skipping load')
+                    return
+
+                self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
+                if not self.metadata_retrieved:
+                    self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
+                    self.metadata_retrieved = True
+                columns_string = ", ".join([f'"{col}"' for col in self.columns_list])
+
+                self.log.info('Creating temp table for %s', self.postgres_table)
+                self.postgres_hook.create_tmp_table(self.postgres_table)
+
+                self.log.info('COPY temp file → %s', tmp_table)
+                self.postgres_hook.write_to_db(file, columns_string, tmp_table)
+
+            # Execute fixed-size batches until we cover all rows in the immutable tmp table
+            conn = self.postgres_hook.get_conn()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(f'select count(1) from "{tmp_table}"')
+                total_rows = cursor.fetchone()[0]
+            finally:
+                conn.close()
+
+            self.log.info('Batched upsert start: %d total rows, batch_size=%d, order by "%s"', total_rows, self.batch_size, pk)
+            import time
+            offset = 0
+            batch_num = 0
+            t_start = time.time()
+            while offset < total_rows:
+                limit = min(self.batch_size, total_rows - offset)
+                batch_num += 1
+                bstart = time.time()
+                if self.columns_to_update is None:
+                    # Insert all columns; limit rows within the SELECT subquery
+                    batch_insert = (
+                        f'insert into "{self.postgres_table}" '
+                        f'select * from ('
+                        f'  select * from "{tmp_table}" order by "{pk}" asc limit {limit} offset {offset}'
+                        f') as source {on_conflict_clause} {conditional_timestamp_clause};'
+                    )
+                else:
+                    # Insert specific columns; limit rows within the SELECT subquery
+                    batch_insert = (
+                        f'insert into "{self.postgres_table}" ({column_list}) '
+                        f'select {column_list} from ('
+                        f'  select {column_list} from "{tmp_table}" order by "{pk}" asc limit {limit} offset {offset}'
+                        f') as source {on_conflict_clause} {conditional_timestamp_clause};'
+                    )
+                # Execute this batch as its own transaction
+                self.postgres_hook._run_psql_commands_in_transaction([batch_insert])
+                belapsed = time.time() - bstart
+                self.log.info('Batch %d: rows %d-%d (limit=%d) in %.2fs', batch_num, offset + 1, offset + limit, limit, belapsed)
+                offset += limit
+
+            telapsed = time.time() - t_start
+            self.log.info('Batched upsert complete: %d batches in %.2fs (%.0f rows/s)', batch_num, telapsed, (total_rows/telapsed) if telapsed > 0 else 0)
+            # Cleanup temporary objects only (no swap needed)
+            self.postgres_hook.swap_db_tables(self.postgres_table, [])
+            return
+
+        # Non-batched path: let parent handle tmp load and run a single insert command inside swap
+        self.insert_commands = [base_insert_sql + ';']
         super().execute(context)
 
 
@@ -193,6 +267,21 @@ class SnowflakeToPostgresBookmarkOperator(SnowflakeToPostgresMergeIncrementalOpe
         self.snowflake_query = f'with inner_cte as ({self.snowflake_query}) select * from inner_cte where {self.incremental_key} > {latest_bookmark}'
         self.bookmark_query = f'with outer_cte as ({self.snowflake_query}) select max({self.incremental_key}) as "bookmark" from outer_cte'
         next_bookmark = self.snowflake_hook.run(sql=self.bookmark_query, handler=lambda cursor: cursor.fetchall())[0]['bookmark']
+
+        # If no new data, skip saving bookmark and just push XComs safely
+        if next_bookmark is None:
+            super().execute(context)
+            self.xcom_push(
+                context,
+                key='previous_bookmark',
+                value=latest_bookmark.replace("'", "")
+            )
+            self.xcom_push(
+                context,
+                key='next_bookmark',
+                value=None
+            )
+            return
 
         super().execute(context)
 
