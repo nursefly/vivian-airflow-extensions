@@ -47,7 +47,7 @@ class ExtendedSnowflakeHook(SnowflakeHook):
                 row_dict.update(zip(column_names, row))
                 yield row_dict, column_names
     
-    def save_snowflake_results_to_tmp_file(self, query, array_fields, file, destination_type='snowflake'):
+    def save_snowflake_results_to_tmp_file(self, query, array_fields, file, destination_type='snowflake', expected_columns=None):
         """
         Save the results of a Snowflake query to a temporary file.
 
@@ -55,6 +55,8 @@ class ExtendedSnowflakeHook(SnowflakeHook):
         :param array_fields: The fields to treat as arrays.
         :param file: The file to write the results to.
         :param destination_type: The type of the destination database.
+        :param expected_columns: Optional list of expected columns. If provided and query results
+            are missing some columns, they will be added with NULL values.
         """
         if destination_type not in ['snowflake', 'postgres']:
             raise AirflowException(f'destination_type must be one of ["snowflake", "postgres"], not {destination_type}')
@@ -66,10 +68,28 @@ class ExtendedSnowflakeHook(SnowflakeHook):
         headers_written = False
 
         writer = None
+        query_columns = None
+        missing_columns = []
 
         for row, headers in rows_generator:
             if not headers_written:
-                writer = csv.DictWriter(file, fieldnames=headers, delimiter='|', quotechar='"')
+                # Convert headers to lowercase for case-insensitive comparison
+                query_columns = [h.lower() for h in headers]
+
+                # If expected_columns is provided, check for missing columns
+                if expected_columns:
+                    expected_lower = [c.lower() for c in expected_columns]
+                    missing_columns = [col for col in expected_columns if col.lower() not in query_columns]
+
+                    if missing_columns:
+                        self.log.info(f'Adding NULL values for {len(missing_columns)} missing columns: {missing_columns}')
+                        # Use expected_columns as the full fieldnames list
+                        writer = csv.DictWriter(file, fieldnames=expected_columns, delimiter='|', quotechar='"')
+                    else:
+                        writer = csv.DictWriter(file, fieldnames=headers, delimiter='|', quotechar='"')
+                else:
+                    writer = csv.DictWriter(file, fieldnames=headers, delimiter='|', quotechar='"')
+
                 writer.writeheader()
                 headers_written = True
 
@@ -77,6 +97,11 @@ class ExtendedSnowflakeHook(SnowflakeHook):
                 for key, value in row.items():
                     if key in array_fields:
                         row[key] = '{' + str(value)[1:-1] + '}'
+
+            # Add NULL values for missing columns
+            if missing_columns:
+                for col in missing_columns:
+                    row[col] = None
 
             writer.writerow(row)
 
