@@ -45,5 +45,43 @@ class TestExtendedSnowflakeHook(unittest.TestCase):
 
         self.assertEqual(lines, ['column1|column2\n', 'value1|value2\n'])
 
+    @patch.object(ExtendedSnowflakeHook, 'generate_rows_from_table')
+    def test_save_snowflake_results_to_tmp_file_with_expected_columns(self, mock_generate_rows_from_table):
+        # Query returns only column1 and column2, but we expect column1, column2, column3
+        mock_generate_rows_from_table.return_value = iter([({'column1': 'value1', 'column2': 'value2'}, ['column1', 'column2'])])
+
+        hook = ExtendedSnowflakeHook()
+        expected_columns = ['column1', 'column2', 'column3']
+
+        with NamedTemporaryFile(mode='w+', delete=True) as tmp:
+            result = hook.save_snowflake_results_to_tmp_file('SELECT * FROM table', [], tmp, 'postgres', expected_columns=expected_columns)
+
+            self.assertTrue(result)
+
+            tmp.seek(0)
+            lines = tmp.readlines()
+
+        # Should have all three columns in header, with column3 as None in data
+        self.assertEqual(lines, ['column1|column2|column3\n', 'value1|value2|\n'])
+
+    @patch.object(ExtendedSnowflakeHook, 'generate_rows_from_table')
+    def test_save_snowflake_results_to_tmp_file_case_insensitive_matching(self, mock_generate_rows_from_table):
+        # Query returns COLUMN1 (uppercase) but expected columns are lowercase
+        mock_generate_rows_from_table.return_value = iter([({'COLUMN1': 'value1', 'COLUMN2': 'value2'}, ['COLUMN1', 'COLUMN2'])])
+
+        hook = ExtendedSnowflakeHook()
+        expected_columns = ['column1', 'column2', 'column3']
+
+        with NamedTemporaryFile(mode='w+', delete=True) as tmp:
+            result = hook.save_snowflake_results_to_tmp_file('SELECT * FROM table', [], tmp, 'postgres', expected_columns=expected_columns)
+
+            self.assertTrue(result)
+
+            tmp.seek(0)
+            lines = tmp.readlines()
+
+        # Should match case-insensitively and add missing column3 as None
+        self.assertEqual(lines, ['column1|column2|column3\n', 'value1|value2|\n'])
+
 if __name__ == '__main__':
     unittest.main()
