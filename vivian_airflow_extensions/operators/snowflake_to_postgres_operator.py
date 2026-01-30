@@ -49,21 +49,29 @@ class SnowflakeToPostgresOperator(BaseOperator):
         self.include_autoincrement_keys = include_autoincrement_keys
 
     def execute(self, context):
+        # Get Postgres table metadata first to know what columns to expect
+        self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
+        if not self.metadata_retrieved:
+            self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
+            self.metadata_retrieved = True
+
         with NamedTemporaryFile('w+') as file:
             self.log.info('Fetching Snowflake data → temp file')
-            new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(self.snowflake_query, self.array_fields, file, 'postgres')
+            new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(
+                self.snowflake_query,
+                self.array_fields,
+                file,
+                'postgres',
+                expected_columns=self.columns_list
+            )
             if not new_data:
                 self.log.info('Snowflake query returned no rows; skipping load')
                 return
 
-            self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
-            if not self.metadata_retrieved:
-                self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
-                self.metadata_retrieved = True
             columns_string = ", ".join([f'"{col}"' for col in self.columns_list])
 
             self.log.info('Creating temp table for %s', self.postgres_table)
-            self.postgres_hook.create_tmp_table(self.postgres_table)        
+            self.postgres_hook.create_tmp_table(self.postgres_table)
 
             self.log.info('COPY temp file → %s', f'Tmp{self.postgres_table}')
             tmp_table = f'Tmp{self.postgres_table}'
@@ -162,17 +170,25 @@ class SnowflakeToPostgresMergeIncrementalOperator(SnowflakeToPostgresOperator):
             pk = self.primary_key_columns[0]
 
             from tempfile import NamedTemporaryFile
+            # Get Postgres table metadata first to know what columns to expect
+            self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
+            if not self.metadata_retrieved:
+                self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
+                self.metadata_retrieved = True
+
             with NamedTemporaryFile('w+') as file:
                 self.log.info('Fetching Snowflake data → temp file')
-                new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(self.snowflake_query, self.array_fields, file, 'postgres')
+                new_data = self.snowflake_hook.save_snowflake_results_to_tmp_file(
+                    self.snowflake_query,
+                    self.array_fields,
+                    file,
+                    'postgres',
+                    expected_columns=self.columns_list
+                )
                 if not new_data:
                     self.log.info('Snowflake query returned no rows; skipping load')
                     return
 
-                self.log.info('Retrieving Postgres table metadata for %s.%s', self.schema, self.postgres_table)
-                if not self.metadata_retrieved:
-                    self.columns_list = self.postgres_hook.get_table_metadata(self.postgres_table, self.schema, self.include_autoincrement_keys)
-                    self.metadata_retrieved = True
                 columns_string = ", ".join([f'"{col}"' for col in self.columns_list])
 
                 self.log.info('Creating temp table for %s', self.postgres_table)
